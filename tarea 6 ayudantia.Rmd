@@ -1,0 +1,204 @@
+---
+title: "Tarea 6; Estivaliz Rosales"
+output: github_document
+---
+Para la actividad de esta semana deberan generar un sample (subconjunto al azar de los datos de spotify) de la data del proyecto 2 (de unas 10.000 observaciones para que sea parecido a lo trabajado aqui) (consideren que esta tarea les puede ser de gran ayuda para cuando tengan que hacer el proyecto 2) y realizar el analisis de clustering jerarquico (exploren los distintos tipos de distancia, metodos que se pueden utilizar para hacer clustering jerarquico, probar cortar el arbol para distintos h, distintos k, y va variando la cantidad de clusters segun el h que eligan, caracterizar los clusters que encuentren).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(ggplot2)
+library(datasets)
+library(cluster)
+library(factoextra)
+library(dplyr)
+library(readr)
+```
+
+```{r}
+head(beats)
+```
+
+## Eliminar datos
+Aqui eliminaremos columnas de datos que no son necesarias
+```{r}
+beats <-  beats[, !(colnames(beats)%in% c("artist_id","album_id","album_type", "album_release_date" , "album_release_year" , "album_release_date_precision","analysis_url", "disc_number","track_href","track_preview_url", "track_uri" , "external_urls.spotify", "album_name", "mode_name", "type"))]
+head(beats)
+```
+
+## Limpieza de la BBDD
+En este paso eliminaremos los datos NA y duplicados
+```{r}
+beats[beats == ""] <- NA
+beats <- na.omit(beats)
+
+beats <- beats[!duplicated(beats$track_id),]
+```
+
+## Contar canciones repetidas
+```{r}
+beats %>% count(duplicated(beats$track_name))
+```
+
+```{r}
+beats %>% distinct(track_name, .keep_all = TRUE, )
+```
+
+```{r}
+beats$duplicate <- duplicated(beats[,c("track_name", "artist_name")])
+beats2 <-beats %>%filter(beats$duplicate == TRUE) %>% arrange("track_name", "duration_ms", desc(duration_ms))
+```
+
+```{r}
+beats2 <- beats2 %>%distinct(track_name, artist_name, .keep_all = TRUE)
+```
+
+```{r}
+beats <- beats[!(beats$duplicate == TRUE),]
+```
+
+```{r}
+beats <- rbind(beats,beats2)
+```
+
+```{r}
+beats$duplicate <- NULL
+```
+
+Hasta aqui consideraremos listo el proceso de limpieza.
+
+## Transformacion de datos
+Transformamos cada variables al tipo de variable que realmente corresponde
+```{r}
+beats$track_id <- as.character(beats$track_id)
+beats$track_name <- as.character(beats$track_name)
+
+beats$danceability <- as.double(as.character(beats$danceability))
+beats$energy <- as.double(as.character(beats$energy))
+beats$key <- as.double(as.character(beats$key))
+beats$loudness <- as.double(as.character(beats$loudness))
+beats$mode <- as.double(as.character(beats$mode))
+beats$speechiness <- as.double(as.character(beats$speechiness)) 
+beats$acousticness <- as.double(as.character(beats$acousticness))
+beats$instrumentalness <- as.double(as.character(beats$instrumentalness))
+beats$liveness <- as.double(as.character(beats$liveness))
+beats$valence <- as.double(as.character(beats$valence))
+beats$tempo <- as.double(as.character(beats$tempo))
+beats$time_signature <- as.numeric(as.character(beats$time_signature))
+beats$duration_ms <- as.double(as.character(beats$duration_ms))
+```
+
+separar las variables segun su naturaleza
+```{r}
+beats_char <- c("track_id", "track_name")
+beats_dou <- c("danceability", "energy", "key", "loudness", "mode", "speechiness", "acousticness", "instrumentalness", "liveness", "valence", "tempo", "duration_ms", "time_signature")
+
+datanum <- beats %>%select(beats_dou)
+datachar <- beats %>%select(beats_char)
+```
+
+## Escalamiento de los datos
+```{r}
+data_sca<-beats %>% slice_sample(n=10000)
+```
+
+# Procesamiento de los Datos
+
+## Clustering Jerarquico
+```{r}
+d = dist(data_sca, method = "euclidean")
+d1 = dist(data_sca, method = "manhattan")
+d2 = dist(data_sca, method = "minkowski")
+
+hist(d, main = "Histograma Distancia Euclideana")
+hist(d1, main = "Histograma Distancia Manhattan")
+hist(d2, main = "Histograma Distancia Minkowski")
+```
+
+## Clustering Aglomerativo
+Complete Model
+```{r}
+set.seed(369)
+model_complete <- hclust(d, method = "complete")
+summary(model_complete)
+```
+
+Ward Model
+```{r}
+set.seed(369)
+model_ward <- hclust(d, method = "ward.D")
+summary(model_ward)
+```
+
+##Comparacion de los coeficientes de aglomeracion para cada metodo
+```{r}
+models <- c("complete", "ward")
+names(models) <- c("complete", "ward")
+agcoef <- function(x) {agnes(data_sca, method = x)$ac}
+
+```
+
+## Dendograma
+Generamos un dendrograma para visualizar la jerarquia.
+```{r}
+library(ggdendro)
+
+ggdendrogram(model_complete, rotate = TRUE, theme_dendro = TRUE) 
+
+```
+## Escalar datos
+```{r}
+datanum_sca<-datanum %>% slice_sample(n=10000)
+datachar_sca<-datachar %>% slice_sample(n=10000)
+
+```
+
+## Corte
+```{r}
+groups <- cutree(model_complete, h = 10)
+table(groups)
+data_sca$clust <- as.factor(groups)
+datanum_sca$clust <- as.factor(groups)
+#fviz_cluster(list(data = data_sca, cluster = groups))
+```
+
+## Caracteristicas de los clusters encontrados
+```{r}
+datanum_sca$clust <- as.numeric(as.character(datanum_sca$clust))
+infoclusters <- aggregate(datanum_sca, by=list(cluster=datanum_sca$clust), mean)
+infoclusters$clust <- NULL
+infoclusters <- infoclusters %>% mutate(duration_min = infoclusters$duration_ms/60000)
+infoclusters$duration_ms <- NULL
+infoclusters
+```
+
+## Filtremos por clusters con mas datos
+```{r filtrar clusters}
+# 1er Cluster con mas datos
+data_c1 <- data_sca %>% 
+  filter(data_sca$clust == 1)
+# 2do Cluster con mas datos
+data_c2 <- data_sca %>% 
+  filter(data_sca$clust == 4)
+# 3er Cluster con mas datos
+data_c3 <- data_sca %>% 
+  filter(data_sca$clust == 2)
+```
+
+```{r}
+data_c2$clust <- NULL
+datanumc2 <- data_c2 %>% 
+  select(beats_dou) %>% 
+  scale() %>% 
+  as_tibble()
+```
+
+## Clustering Divisivo
+```{r clustering divisivo}
+
+modelo_div <- diana(datanumc2)
+modelo_div$dc
+pltree(modelo_div, cex = 0.8, hang = -1.5, main = "Dendrogram of diana")
+```
+
